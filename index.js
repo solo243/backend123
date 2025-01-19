@@ -5,69 +5,91 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+
+const mongoose = require('mongoose');
+const Timer = require('./time.schema');
+
+// Replace with your MongoDB URI
+const MONGODB_URI = 'mongodb+srv://admin:admin123@cluster.di249.mongodb.net/';
+
+mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+    .then(() => console.log('Connected to MongoDB'))
+    .catch((error) => console.error('Error connecting to MongoDB:', error));
+
+
 let startTime = null;
 let remainingTime = null;
 let isPaused = false;
 
-app.get('/start-time', (req, res) => {
-    if (startTime || isPaused) {
-        console.log(res.json({ startTime, remainingTime, isPaused }))
 
-        res.json({ startTime, remainingTime, isPaused });
-    } else {
-        console.log(res.status(404).json({ message: 'Countdown not started yet.' }))
-
-        res.status(404).json({ message: 'Countdown not started yet.' });
+// Get the timer state
+app.get('/start-time', async (req, res) => {
+    try {
+        const timer = await Timer.findOne();
+        if (!timer) {
+            return res.status(404).json({ message: 'Countdown not started yet.' });
+        }
+        res.json(timer);
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching timer state.' });
     }
 });
 
-// Endpoint to start or resume the countdown
-app.post('/start-time', (req, res) => {
-    if (isPaused && remainingTime !== null) {
-        // Resume countdown
-        startTime = Date.now() - (24 * 60 * 60 * 1000 - remainingTime * 1000);
-        isPaused = false;
-        remainingTime = null;
-        console.log(res.status(200).json({ message: 'Countdown resumed!', startTime }))
+// Start or resume the countdown
+app.post('/start-time', async (req, res) => {
+    try {
+        let timer = await Timer.findOne();
 
-        res.status(200).json({ message: 'Countdown resumed!', startTime });
-    } else if (!startTime) {
-        // Start new countdown
-        startTime = Date.now();
-        isPaused = false;
-        remainingTime = null;
-        console.log(res.status(201).json({ message: 'Countdown started!', startTime }))
+        if (timer?.isPaused && timer.remainingTime !== null) {
+            // Resume countdown
+            timer.startTime = new Date(Date.now() - (24 * 60 * 60 * 1000 - timer.remainingTime * 1000));
+            timer.isPaused = false;
+            timer.remainingTime = null;
+        } else if (!timer) {
+            // Start new countdown
+            timer = new Timer({ startTime: new Date(), isPaused: false });
+        } else {
+            return res.status(400).json({ message: 'Countdown already started!' });
+        }
 
-        res.status(201).json({ message: 'Countdown started!', startTime });
-    } else {
-        res.status(400).json({ message: 'Countdown already started!' });
+        await timer.save();
+        res.status(200).json({ message: 'Countdown started/resumed!', timer });
+    } catch (error) {
+        res.status(500).json({ message: 'Error starting countdown.' });
     }
 });
 
-// Endpoint to pause the countdown
-app.post('/pause-time', (req, res) => {
-    if (!isPaused && startTime) {
-        remainingTime = Math.max(
-            24 * 60 * 60 - Math.floor((Date.now() - startTime) / 1000),
-            0
-        );
-        isPaused = true;
-        startTime = null; // Clear startTime since it's paused
-        console.log(res.status(200).json({ message: 'Countdown paused!', remainingTime }));
-        res.status(200).json({ message: 'Countdown paused!', remainingTime });
-    } else {
-        console.log(res.status(400).json({ message: 'Countdown is not running!' }))
-        res.status(400).json({ message: 'Countdown is not running!' });
+// Pause the countdown
+app.post('/pause-time', async (req, res) => {
+    try {
+        const timer = await Timer.findOne();
+        if (timer && !timer.isPaused && timer.startTime) {
+            timer.remainingTime = Math.max(
+                24 * 60 * 60 - Math.floor((Date.now() - new Date(timer.startTime).getTime()) / 1000),
+                0
+            );
+            timer.isPaused = true;
+            timer.startTime = null; // Clear startTime since it's paused
+            await timer.save();
+            res.status(200).json({ message: 'Countdown paused!', timer });
+        } else {
+            res.status(400).json({ message: 'Countdown is not running!' });
+        }
+    } catch (error) {
+        res.status(500).json({ message: 'Error pausing countdown.' });
     }
 });
 
-// Endpoint to reset the countdown
-app.delete('/start-time', (req, res) => {
-    startTime = null;
-    remainingTime = null;
-    isPaused = false;
-    res.status(200).json({ message: 'Countdown reset!' });
+// Reset the countdown
+app.delete('/start-time', async (req, res) => {
+    try {
+        await Timer.deleteMany(); // Clear all timer states
+        res.status(200).json({ message: 'Countdown reset!' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error resetting timer.' });
+    }
 });
+
 
 app.get('/', (req, res) => {
     res.json("working.....")
